@@ -330,7 +330,8 @@ def zenkukan(A, d):
         pv = {}
         for q in (False, True):
             c_ = collections.Counter(reg[bgm & (par == q)].tolist()); pv[q] = c_.most_common(1)[0][0] if c_ else 0
-        panel_rows = np.nonzero(bgm.mean(1) > 0.2)[0]
+        pan = pal_t[reg] == 0x7000                                                       # ★판 = 0x7000 무늬만(0x7FFF 는 투명 0번 — 위 역 띠 오른쪽 투명칸을 판으로 오인해 띠 아래 반을 무늬로 덮음, 하스피 «도쿄역 팝업 깨짐»)
+        panel_rows = np.nonzero(pan.mean(1) > 0.2)[0]
         er = np.zeros((h, w), bool)
         if len(panel_rows): er[panel_rows[0]:, :] = ~bgm[panel_rows[0]:, :]
         cvp = A.can[Y:Y + h, X:X + w]; cvp[er] = np.where(par, pv[True], pv[False])[er]
@@ -359,7 +360,11 @@ def zenkukan(A, d):
             gh = max(g.shape[0] for g in out)
             if gh <= avail: break
         gap = 4; total = sum(g.shape[1] for g in out) + gap * (len(out) - 1)
-        ink = np.zeros((h, w), bool); x = (w - total) // 2; yy0 = top + 1 + (avail - gh) // 2
+        # ★가로 가운데 = 파란 판 가운데(찾은 칸 가운데는 판보다 왼쪽 — 하스피 «가운데 정렬 안 됨»)
+        r0 = Y + (panel_rows[0] if len(panel_rows) else 4); xa, xb = max(0, X - 24), min(A.orig.shape[1], X + w + 24)
+        pc = np.nonzero((pal_t[A.orig[r0:Y + h, xa:xb]] == 0x7000).mean(0) > 0.2)[0]
+        cx = (xa + pc[0] + xa + pc[-1] + 1) / 2 - X if len(pc) else w / 2
+        ink = np.zeros((h, w), bool); x = int(round(cx - total / 2)); x = max(2, min(w - total - 2, x)); yy0 = top + 1 + (avail - gh) // 2
         for g in out:
             ink[yy0:yy0 + g.shape[0], x:x + g.shape[1]] |= g; x += g.shape[1] + gap
         def dil(b):

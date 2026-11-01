@@ -147,6 +147,7 @@ def draw_stations(A, n):
         fill = next(c for c, _ in cnt.most_common() if c not in (0, STN_BLACK, STN_MARK))
         er0 = bot
         bot = min(bot, STN_TOP + 40)                                                      # ★게임은 역 이름 줄을 40줄까지만 잘라 씀(하스피 «역 이름 아래 잘림», 원본 최장 39줄)
+        if cx > 328: bot = min(bot, 488)                                                  # ★게임은 시트 x≥336 열의 y≥488 행을 안 옮김 = 오른쪽 열은 31줄까지(스테이트 s_yuraku NBG1 맵 18행, 하스피 «유라쿠초·신오사카·요코하마 잘림»)
         C[STN_TOP:er0, x0:x1][np.isin(C[STN_TOP:er0, x0:x1], [fill, STN_BLACK])] = 0
         er = C[STN_TOP:bot, x0:x1]
         cols = 1
@@ -155,6 +156,7 @@ def draw_stations(A, n):
             if step * (len(gs) - 1) + gs[-1].shape[0] + 2 <= bot - STN_TOP: break
         else:                                                                             # 7글자 역(사가아라시야마 등) → 두 줄 세로(오른쪽 줄 먼저 = 세로쓰기 순서)
             f, step, cols = 'G7', 8, 2; gs = [GJ.syl(ch, f) for ch in kr]
+            if cx == 328 and len(gs) > 6: step = 7                              # 오른쪽 줄이 x=336 을 넘음(히가시카나가와) — 위 잘림 경계 안으로
             per = (len(gs) + 1) // 2
             assert step * (per - 1) + gs[-1].shape[0] + 2 <= bot - STN_TOP, ('세로 넘침', kr)
         ink = np.zeros((bot - STN_TOP, x1 - x0), bool)
