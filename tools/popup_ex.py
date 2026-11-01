@@ -156,8 +156,8 @@ def apply(A, d, phr):
             if info['kind'] != 'C':
                 txt = txt & (A.orig[Y:Y + h, X:X + w] != 0)                                 # 투명(0)은 그대로 — 상자 밖을 칠하지 않음
                 reg[txt] = next(iter(info['bg']))
-            elif not isinstance(kind, tuple) and (lambda o: (o[~txt] == collections.Counter(o[~txt].tolist()).most_common(1)[0][0]).mean() >= 0.9 if (~txt).any() else False)(A.orig[Y:Y + h, X:X + w]):
-                o = A.orig[Y:Y + h, X:X + w]; reg[txt] = collections.Counter(o[~txt].tolist()).most_common(1)[0][0]   # 바탕이 거의 한 색(투명 등) → 그 색
+            elif not isinstance(kind, tuple) and (lambda o: (o[~txt] == 0).mean() >= 0.9 if (~txt).any() else False)(A.orig[Y:Y + h, X:X + w]):   # 거의 투명 바탕일 때만(검정 1 로 칠하면 검은 상자 — 하스피 «내리막»)
+                reg[txt] = 0                                                                 # 투명
             elif isinstance(kind, tuple):                                                  # 불꽃 위 글자 → 글자(+2px) 자리를 주변 화소로 안쪽부터 메움
                 o_ = A.orig[Y:Y + h, X:X + w]; v_ = pal_t[o_]; r_, g_, b_ = v_ & 31, v_ >> 5 & 31, v_ >> 10 & 31
                 flame = (r_ >= 24) & (g_ < 22) & (b_ < 8) & ~((r_ > 26) & (g_ > 26))         # 빨강~주황 불꽃
@@ -204,14 +204,15 @@ def apply(A, d, phr):
             if opt.get('fill') is not None: info = dict(info, ramp=[opt['fill']] * h, ring=opt.get('ring', info['ring']))
             else:                                                                            # 줄 색 중 주된 글자색과 동떨어진 것(이웃 글자·바탕색) → 주된 색(하스피 «정지신호 노란 줄·알림등무시 빨간 줄»)
                 rp = list(info['ramp']); rgb_ = lambda c: np.array([pal_t[c] & 31, pal_t[c] >> 5 & 31, pal_t[c] >> 10 & 31])
-                o_ = A.orig[Y:Y + h, X:X + w]; mc = collections.Counter(o_[info['f']].tolist()).most_common(1)[0][0] if info['f'].any() else rp[0]
                 bgs = set(info['bg']) if isinstance(info['bg'], set) else set()
-                rp = [mc if (c in bgs or np.abs(rgb_(c) - rgb_(mc)).sum() > 18) else c for c in rp]
+                cand = collections.Counter(c for c in rp if c not in (0, 1) and c not in bgs)       # 투명·검정·바탕은 글자색 후보에서 뺌(하스피 «시간초과 검은색»)
+                mc = cand.most_common(1)[0][0] if cand else rp[0]
+                rp = [mc if (c in bgs or c in (0, 1) or np.abs(rgb_(c) - rgb_(mc)).sum() > 18) else c for c in rp]
                 info = dict(info, ramp=rp)
             if info['ring'] is None: lv[lv == 1] = 0                                    # 테두리 없는 원본 → 테두리 없이
             A.put(X, Y, lv, info['ramp'], info['ring'] if info['ring'] is not None else 0)
             if info['ring'] is not None:                                                     # 획 사이 1px 틈(양옆 또는 위아래가 테두리) → 테두리색(바탕 빨강이 줄처럼 비치지 않게)
-                rg = A.can[Y:Y + h, X:X + w]; rc_ = rg == info['ring']; ink_ = lv > 0
+                rg = A.can[Y:Y + h, X:X + w]; rc_ = lv == 1; ink_ = lv > 0                     # 새로 그린 테두리만(바둑판 검정과 번호가 같아도)
                 p_ = np.pad(rc_, 1); gap = ((p_[1:-1, :-2] & p_[1:-1, 2:]) | (p_[:-2, 1:-1] & p_[2:, 1:-1])) & ~ink_
                 inb = np.zeros_like(gap); inb[by0:by1, bx0:bx1] = True
                 rg[gap & inb] = info['ring']
@@ -325,7 +326,17 @@ def zenkukan(A, d):
             else: last = ramp[i]
         red = collections.Counter(c for c in reg.ravel().tolist() if pal_t[c] == 0x001F).most_common(1)
         blk = collections.Counter(c for c in reg.ravel().tolist() if pal_t[c] == 0x0421).most_common(1)
-        A.erase_cells(X, Y + 2, w, h - 2, ~bgm[2:])
+        par = (np.add.outer(np.arange(Y, Y + h), np.arange(X, X + w)) % 2).astype(bool)   # 파란 판 무늬(홀짝)로 메움 — 셀 메움은 회색 네모가 남음(하스피)
+        pv = {}
+        for q in (False, True):
+            c_ = collections.Counter(reg[bgm & (par == q)].tolist()); pv[q] = c_.most_common(1)[0][0] if c_ else 0
+        panel_rows = np.nonzero(bgm.mean(1) > 0.2)[0]
+        er = np.zeros((h, w), bool)
+        if len(panel_rows): er[panel_rows[0]:, :] = ~bgm[panel_rows[0]:, :]
+        cvp = A.can[Y:Y + h, X:X + w]; cvp[er] = np.where(par, pv[True], pv[False])[er]
+        for yy in (Y + h, Y + h + 1):                                                    # 칸 바로 아래 2줄의 원래 글자 끄트머리(금속·검정·잔점) → 판 무늬(하스피 «주 오른쪽 밑 찌꺼기»)
+            for xx in range(X, X + w):
+                if pal_t[A.can[yy, xx]] not in (0x7000, 0x7FFF): A.can[yy, xx] = pv[bool((yy + xx) % 2)]
         # 아래 2줄(그림자 빨강 끝): ALL ROUND CLEAR 글자색과 그에 붙은 화소는 남기고 나머지 비바탕 지움
         lo = A.orig[Y + h:Y + h + 2, X:X + w]; lp = pal_t[lo]
         arc = np.isin(lp, [0x023F, 0x02FF, 0x019F, 0x341F]) | (((lp & 31) > 20) & ((lp >> 5 & 31) > 10))
@@ -337,12 +348,18 @@ def zenkukan(A, d):
         if lm.any(): A.erase_cells(X, Y + h, w, 2, lm)
         import pixfont as PF
         gs = [np.kron(PF.cell(ch, 11, bold=True), np.ones((1, 1))) for ch in '전구간완주']
-        sc = 2.2; out = []
-        for g in gs:
-            H2, W2 = int(round(g.shape[0] * sc)), int(round(g.shape[1] * sc))
-            yi = (np.arange(H2) / sc).astype(int); xi = (np.arange(W2) / sc).astype(int); out.append(g[yi][:, xi] > 0)
-        gh = max(g.shape[0] for g in out); gap = 4; total = sum(g.shape[1] for g in out) + gap * (len(out) - 1)
-        ink = np.zeros((h, w), bool); x = (w - total) // 2; yy0 = (h - gh) // 2
+        mrows = np.nonzero(np.array([sum(1 for c in reg[yy].tolist() if gray(c)) for yy in range(h)]) > 2)[0]   # ★원본 금속 글자 행 범위(게임은 파란 판 안만 씀 — 위로 나가면 잘림, 하스피)
+        top, bot = (mrows[0], mrows[-1]) if len(mrows) else (0, h - 1)
+        avail = bot - top + 1 - 2                                                       # 바깥 테두리 2px(검정+빨강) 몫 빼고
+        for sc in (2.2, 2.1, 2.0, 1.9, 1.8, 1.7, 1.6, 1.5):
+            out = []
+            for g in gs:
+                H2, W2 = int(round(g.shape[0] * sc)), int(round(g.shape[1] * sc))
+                yi = (np.arange(H2) / sc).astype(int); xi = (np.arange(W2) / sc).astype(int); out.append(g[yi][:, xi] > 0)
+            gh = max(g.shape[0] for g in out)
+            if gh <= avail: break
+        gap = 4; total = sum(g.shape[1] for g in out) + gap * (len(out) - 1)
+        ink = np.zeros((h, w), bool); x = (w - total) // 2; yy0 = top + 1 + (avail - gh) // 2
         for g in out:
             ink[yy0:yy0 + g.shape[0], x:x + g.shape[1]] |= g; x += g.shape[1] + gap
         def dil(b):
