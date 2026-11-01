@@ -176,7 +176,7 @@ def apply(A, d, sheet):
             assert key in PASS, ('모르는 통과 이름', sheet, key)
             t = PASS[key] + '통과'
         N_ = nv[A.orig]; G_ = gm[A.orig]
-        while x1 < A.orig.shape[1] and (N_[y:y + 16, x1].any() or G_[y:y + 16, x1].any()): x1 += 1   # 띠 오른쪽 끝까지(車 끝 획 잔재 — 하스피 «역정차 제대로 안 잘림»)
+        while k != 'dep' and x1 < A.orig.shape[1] and (N_[y:y + 16, x1].any() or G_[y:y + 16, x1].any()): x1 += 1   # 띠 오른쪽 끝까지(車 끝 획 잔재 — 하스피 «역정차 제대로 안 잘림»)
         reg = A.orig[y:y + 16, x0:x1]
         fills = collections.Counter(reg[gm[reg]].tolist()); fill = fills.most_common(1)[0][0]
         bgc = collections.Counter(reg[nv[reg]].tolist()); bg = bgc.most_common(1)[0][0] if bgc else None
@@ -190,7 +190,7 @@ def apply(A, d, sheet):
             A.erase_cells(x0, y, x1 - x0, 16, m)
         for fn in ('B', 'G11', 'G9'):
             try:
-                lv = GJ.word(t, x1 - x0, 16, fn, 'ring', 'l'); break
+                lv = GJ.word(t, x1 - x0, 16, fn, 'ring', 'c'); break                   # 하스피: 원본 파란 띠 가운데
             except AssertionError:
                 continue
         else:

@@ -24,7 +24,7 @@ PHR = [
     (S, (406, 16, 498, 31), '경적과다', 'R'),
     (S, (2, 42, 142, 70), 'ATS작동', 'R'),
     (S, (4, 74, 110, 100), '시간초과', 'R'),
-    (S, (352, 70, 378, 88), '초', 'C', 'G14B', {'fill': 18, 'ring': 36, 'strict': 1}), (S, (352, 88, 378, 103), '초', 'C', 'G14B', {'fill': 61, 'ring': 54, 'strict': 1}),
+    (S, (352, 70, 378, 88), '초', 'C', 'G14B', {'fill': 18, 'ring': 36, 'strict': 1, 'here': 1, 'clear': 1}), (S, (352, 88, 378, 103), '초', 'C', 'G14B', {'fill': 61, 'ring': 54, 'strict': 1, 'here': 1, 'clear': 1}),
     (S, (0, 104, 144, 128), '표지·신호무시', 'R'),
     (S, (280, 104, 362, 120), '출발진행', 'G'),   # 원본 글자 104~118행(게임이 그 범위만 씀 — 103행부터면 위 잘림)
     (S, (368, 104, 512, 119), '역진입속도초과', 'R'),   # 빨간 상자 104행·368열부터(밖은 투명 — 칠하면 게임에서 위가 잘려 보임)
@@ -45,6 +45,7 @@ PHR = [
     ('DR_B2205', (240, 366, 402, 386), '비상브레이크 써라', ('F', 'R')),
     ('DR_B8207', (242, 264, 348, 288), '차막이충돌', ('F', 'Y')),   # 원본 ！(353~355열)는 그대로
     ('DR_B2203', (158, 269, 242, 289), '경적울려', 'C'),
+    ('DR_B4201', (0, 263, 80, 283), '경적울려', 'C'),   # 산인본선 판(X 표지 아래, 다른 자리·모양) — 하스피 스샷
     (S, (448, 61, 479, 76), '알림등', ('F', {0x23}), 'G9'), (S, (480, 61, 511, 76), '알림등', ('F', {0x23}), 'G9'),
     ('DR_B9200', (340, 176, 444, 189), '승차권을', 'M', 'G11'), ('DR_B9200', (340, 189, 444, 203), '사 주세요', 'M', 'G11'),
     ('DR_B9200', (340, 216, 440, 231), '운전종료', 'M'),
@@ -135,23 +136,51 @@ def font_for(h, f=None):
 def apply(A, d, phr):
     done = []; pal_t = np.frombuffer(d[0x40:0x240], '>u2').astype(int); seen = []
     for sheet, box, kr, kind, *f in phr:
-        opt = f.pop() if f and isinstance(f[-1], dict) else {}
+        opt = dict(f.pop()) if f and isinstance(f[-1], dict) else {}            # ★복사(PHR 표 원본을 지우면 두 번째 시트부터 옵션이 빠짐)
+        strict = here = clear = 0
         if opt:
             p0 = np.frombuffer(open(os.path.join(DISC, sheet + '.BIN'), 'rb').read()[0x40:0x240], '>u2').astype(int)
             idx = lambda c: next((i for i in range(256) if int(pal_t[i]) == int(p0[c])), None)
-            strict = opt.pop('strict', 0); opt = {k: idx(v) for k, v in opt.items()}
+            strict = opt.pop('strict', 0); here = opt.pop('here', 0); clear = opt.pop('clear', 0); opt = {k: idx(v) for k, v in opt.items()}
             if strict:                                                           # 秒: 칸 전체가 본보기와 70% 넘게 같아야(엉뚱한 자리 오검출 막기)
                 A0 = atlas.Atlas(open(os.path.join(DISC, sheet + '.BIN'), 'rb').read()); bx0, by0, bx1, by1 = box
                 tq = quant(p0[A0.orig[by0:by1, bx0:bx1]])
         for (X, Y), info, blk in phr_hits(A, sheet, box, kind, pal_t):
             x0, y0, x1, y1 = box; w, h = x1 - x0, y1 - y0
             if opt and 'tq' in dir() and strict and np.mean(quant(pal_t[A.orig[Y:Y + h, X:X + w]]) == tq) < 0.7: continue
+            if opt and here and (X, Y) != (x0, y0): continue                                # 秒 = 본보기 자리에서만(산인본선 시트에서 엉뚱한 세 자리에 그려짐)
             if any(t == kr and abs(X - a) < w // 2 and abs(Y - b) < h // 2 for t, a, b in seen): continue   # 같은 문구 겹침 = 한 번만
             seen.append((kr, X, Y))
             reg = A.can[Y:Y + h, X:X + w]; txt = info['txt']
+            if clear: txt = A.orig[Y:Y + h, X:X + w] != 0                                    # 秒 칸: 투명 아닌 것 전부(그림자 덩어리까지) 지움
             if info['kind'] != 'C':
                 txt = txt & (A.orig[Y:Y + h, X:X + w] != 0)                                 # 투명(0)은 그대로 — 상자 밖을 칠하지 않음
                 reg[txt] = next(iter(info['bg']))
+            elif not isinstance(kind, tuple) and (lambda o: (o[~txt] == collections.Counter(o[~txt].tolist()).most_common(1)[0][0]).mean() >= 0.9 if (~txt).any() else False)(A.orig[Y:Y + h, X:X + w]):
+                o = A.orig[Y:Y + h, X:X + w]; reg[txt] = collections.Counter(o[~txt].tolist()).most_common(1)[0][0]   # 바탕이 거의 한 색(투명 등) → 그 색
+            elif isinstance(kind, tuple):                                                  # 불꽃 위 글자 → 글자(+2px) 자리를 주변 화소로 안쪽부터 메움
+                o_ = A.orig[Y:Y + h, X:X + w]; v_ = pal_t[o_]; r_, g_, b_ = v_ & 31, v_ >> 5 & 31, v_ >> 10 & 31
+                flame = (r_ >= 24) & (g_ < 22) & (b_ < 8) & ~((r_ > 26) & (g_ > 26))         # 빨강~주황 불꽃
+                txt = txt | (~flame & (o_ != 0))                                             # 불꽃·투명 아닌 것 = 글자(노랑 단계·초록·테두리 전부)
+                mm = txt.copy()
+                for _ in range(2):
+                    p_ = np.pad(mm, 1); mm = mm | p_[:-2, 1:-1] | p_[2:, 1:-1] | p_[1:-1, :-2] | p_[1:-1, 2:]
+                big = np.zeros(A.can.shape, bool); big[Y:Y + h, X:X + w] = mm; C_ = A.can
+                def fl_ok(c):                                                                 # 메움 재료 = 불꽃 색·투명만(아래 숫자 노랑 끌어오지 않음)
+                    v = int(pal_t[c]); r2, g2, b2 = v & 31, v >> 5 & 31, v >> 10 & 31
+                    return c == 0 or (r2 >= 24 and g2 < 22 and b2 < 8)
+                left = 0
+                while big.any():
+                    nxt = big.copy()
+                    for yy, xx in zip(*np.nonzero(big)):
+                        nb = [C_[y2, x2] for y2, x2 in ((yy - 1, xx), (yy + 1, xx), (yy, xx - 1), (yy, xx + 1))
+                              if 0 <= y2 < C_.shape[0] and 0 <= x2 < C_.shape[1] and not big[y2, x2] and fl_ok(C_[y2, x2])]
+                        if nb: C_[yy, xx] = collections.Counter(nb).most_common(1)[0][0]; nxt[yy, xx] = False
+                    if (nxt == big).all(): break
+                    big = nxt
+                C_[big] = 0                                                                   # 못 메운 칸(불꽃 없는 곳) = 투명
+            elif (np.isin(A.orig[Y:Y + h, X:X + w], [0, 1]) | txt).mean() < 0.97:
+                A.erase_cells(X, Y, w, h, txt)                                               # 그림 위(바둑판 아님) = 셀 안 메움(예전대로)
             else:                                                                          # 바둑판(0/1) 바탕: 홀짝 자리별 원래 값으로 메움(옆 그림 끌어오지 않음)
                 ro = A.orig[Y:Y + h, X:X + w]; par = (np.add.outer(np.arange(Y, Y + h), np.arange(X, X + w)) % 2).astype(bool)
                 bgm = np.isin(ro, [0, 1])
@@ -173,8 +202,19 @@ def apply(A, d, phr):
                 raise AssertionError(('넘침', kr, bw, bh))
             lv = np.zeros((h, w), np.uint8); lv[by0:by1, bx0:bx1] = lv0
             if opt.get('fill') is not None: info = dict(info, ramp=[opt['fill']] * h, ring=opt.get('ring', info['ring']))
+            else:                                                                            # 줄 색 중 주된 글자색과 동떨어진 것(이웃 글자·바탕색) → 주된 색(하스피 «정지신호 노란 줄·알림등무시 빨간 줄»)
+                rp = list(info['ramp']); rgb_ = lambda c: np.array([pal_t[c] & 31, pal_t[c] >> 5 & 31, pal_t[c] >> 10 & 31])
+                o_ = A.orig[Y:Y + h, X:X + w]; mc = collections.Counter(o_[info['f']].tolist()).most_common(1)[0][0] if info['f'].any() else rp[0]
+                bgs = set(info['bg']) if isinstance(info['bg'], set) else set()
+                rp = [mc if (c in bgs or np.abs(rgb_(c) - rgb_(mc)).sum() > 18) else c for c in rp]
+                info = dict(info, ramp=rp)
             if info['ring'] is None: lv[lv == 1] = 0                                    # 테두리 없는 원본 → 테두리 없이
             A.put(X, Y, lv, info['ramp'], info['ring'] if info['ring'] is not None else 0)
+            if info['ring'] is not None:                                                     # 획 사이 1px 틈(양옆 또는 위아래가 테두리) → 테두리색(바탕 빨강이 줄처럼 비치지 않게)
+                rg = A.can[Y:Y + h, X:X + w]; rc_ = rg == info['ring']; ink_ = lv > 0
+                p_ = np.pad(rc_, 1); gap = ((p_[1:-1, :-2] & p_[1:-1, 2:]) | (p_[:-2, 1:-1] & p_[2:, 1:-1])) & ~ink_
+                inb = np.zeros_like(gap); inb[by0:by1, bx0:bx1] = True
+                rg[gap & inb] = info['ring']
             done.append((kr, X, Y))
     return done
 
