@@ -1,0 +1,7 @@
+work/
+my files/
+dist/
+__pycache__/
+!work/
+work/*
+!work/text/
